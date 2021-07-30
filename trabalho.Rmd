@@ -1,0 +1,420 @@
+---
+title: "Frota de veículos no Brasil, de 2005 até 2021"
+author: ""
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    social: menu
+    source_code: embed
+    runtime : shiny
+---
+
+```{r setup, include=FALSE}
+library(geobr)
+library(sf)
+library(readxl)
+library(dplyr)
+library(tidyverse)
+library(plotly)
+library(leaflet)
+library(flexdashboard)
+library(shiny)
+library(gt)
+library(palettetown)
+
+sfE <- read_state()
+
+dadosE <- read_xlsx("anos.xlsx")
+
+dadosE <- dadosE %>%
+  filter(!dadosE$`REGIÕES E ESTADOS` %in% c("Norte","Sul", "Sudeste", "Nordeste", "Centro Oeste"))
+
+dadosE$`DE PASSAGEIROS` <- dadosE$AUTOMÓVEL + dadosE$BONDE + dadosE$CICLOMOTOR +
+  dadosE$MICROÔNIBUS + dadosE$MOTOCICLETA + dadosE$MOTONETA + dadosE$ÔNIBUS +
+  dadosE$QUADRICICLO + dadosE$`SIDE.CAR` + dadosE$TRICICLO
+dadosE$`DE CARGA` <- dadosE$CAMINHÃO + dadosE$CAMINHONETE + dadosE$REBOQUE +
+  dadosE$`SEMI.REBOQUE` + dadosE$`CHASSI.PLATAFORMA`
+dadosE$MISTO <- dadosE$CAMIONETA + dadosE$UTILITÁRIO + dadosE$OUTROS
+dadosE$`DE TRAÇÃO` <- dadosE$`CAMINHÃO.TRATOR` + dadosE$`TRATOR.ESTEIRA` +
+  dadosE$`TRATOR.RODAS`
+   
+sfE$name_state <- iconv(sfE$name_state,from="UTF-8",to="ASCII//TRANSLIT") %>% toupper()
+dadosE$`REGIÕES E ESTADOS` <- iconv(dadosE$`REGIÕES E ESTADOS`,from="UTF-8",to="ASCII//TRANSLIT") %>% toupper()
+
+dadosE <- left_join(x = sfE, y = dadosE, 
+                    by = c("name_state" = "REGIÕES E ESTADOS"))
+dadosE$name_region <- NULL
+dadosE$code_region <- NULL
+dadosE <- rename(dadosE, name = name_state)
+
+sfR <- read_region()
+
+dadosR <- read_xlsx("anos.xlsx")
+
+dadosR <- dadosR %>%
+  filter(dadosR$`REGIÕES E ESTADOS` %in% c("Norte","Sul", "Sudeste", "Nordeste", "Centro Oeste"))
+
+dadosR$`DE PASSAGEIROS` <- dadosR$AUTOMÓVEL + dadosR$BONDE + dadosR$CICLOMOTOR +
+  dadosR$MICROÔNIBUS + dadosR$MOTOCICLETA + dadosR$MOTONETA + dadosR$ÔNIBUS +
+  dadosR$QUADRICICLO + dadosR$`SIDE.CAR` + dadosR$TRICICLO
+dadosR$`DE CARGA` <- dadosR$CAMINHÃO + dadosR$CAMINHONETE + dadosR$REBOQUE +
+  dadosR$`SEMI.REBOQUE` + dadosR$`CHASSI.PLATAFORMA`
+dadosR$MISTO <- dadosR$CAMIONETA + dadosR$UTILITÁRIO + dadosR$OUTROS
+dadosR$`DE TRAÇÃO` <- dadosR$`CAMINHÃO.TRATOR` + dadosR$`TRATOR.ESTEIRA` +
+  dadosR$`TRATOR.RODAS`
+
+sfR$name_region <- iconv(sfR$name_region,from="UTF-8",to="ASCII//TRANSLIT") %>% toupper()
+dadosR$`REGIÕES E ESTADOS` <- iconv(dadosR$`REGIÕES E ESTADOS`,from="UTF-8",to="ASCII//TRANSLIT") %>% toupper()
+
+dadosR <- left_join(x = sfR, y = dadosR, 
+                    by = c("name_region" = "REGIÕES E ESTADOS"))
+
+dadosR <- rename(dadosR, name = name_region)
+
+dadosT <- read_xlsx("anos.xlsx")
+
+dadosT$`DE PASSAGEIROS` <- dadosT$AUTOMÓVEL + dadosT$BONDE + dadosT$CICLOMOTOR +
+  dadosT$MICROÔNIBUS + dadosT$MOTOCICLETA + dadosT$MOTONETA + dadosT$ÔNIBUS +
+  dadosT$QUADRICICLO + dadosT$`SIDE.CAR` + dadosT$TRICICLO
+dadosT$`DE CARGA` <- dadosT$CAMINHÃO + dadosT$CAMINHONETE + dadosT$REBOQUE +
+  dadosT$`SEMI.REBOQUE` + dadosT$`CHASSI.PLATAFORMA`
+dadosT$MISTO <- dadosT$CAMIONETA + dadosT$UTILITÁRIO + dadosT$OUTROS
+dadosT$`DE TRAÇÃO` <- dadosT$`CAMINHÃO.TRATOR` + dadosT$`TRATOR.ESTEIRA` +
+  dadosT$`TRATOR.RODAS`
+
+dadosT <- rename(dadosT, name = `REGIÕES E ESTADOS`)
+
+```
+MAPA
+=================================
+
+Inputs {.sidebar}
+----------------------------------
+```{r}
+    selectInput("var", "Tipo de Veículo", c("TOTAL","DE PASSAGEIROS",
+                                               "DE CARGA","MISTO","DE TRAÇÃO"))
+    selectInput("ano", "Período(Em ano)", c("2005","2006","2007","2008","2009",
+                                          "2010","2011","2012","2013","2014",
+                                          "2015","2016","2017","2018","2019",
+                                          "2020","2021"))
+    selectInput("mapas", "Separado por", c("Regiões","Estados"))
+
+```
+
+
+Column
+-----------------------------------------------------------------------
+
+### **Mapa da Frota de Veículos do Brasil por Regiões/Estados**
+
+```{r}
+renderLeaflet({
+    
+    plot <- input$mapas
+    
+    if(plot %in% "Regiões")
+      dados <- dadosR
+    if(plot %in% "Estados")
+      dados <- dadosE
+    
+    
+    variavel <- input$var
+    anos <- input$ano
+    
+    dados <- dados %>% filter(dados$DATA %in% anos)
+    
+    pale <- colorRampPalette(c("palegreen3","forestgreen","seagreen4","navyblue"))
+    colorData <- dados[[variavel]]
+    pal <- colorBin(pale(20), colorData)
+    
+    mapa <- dados %>% leaflet() %>% 
+      addTiles() %>% addPolygons(
+                  fillColor = ~pal(colorData), fillOpacity = 5,    
+                  weight = 1.1, color = "gold", stroke = T,
+                  highlightOptions = highlightOptions(
+                    color = "azure2", weight = 3, bringToFront = TRUE ),
+                  popup = ~ paste0(
+                    sep = " ",
+                    "<b>", name, "<b><br>",
+                    "<b>Número de veículos ","<b></b>", variavel, ": </b>",
+                    colorData),
+                  label = ~name, layerId = ~name) %>% 
+      addLegend("bottomright", pal = pal, values = ~colorData)
+    
+    mapa
+  })
+```
+
+Gráficos 
+==================================
+
+Inputs {.sidebar}
+----------------------------------
+```{r}
+    selectInput("var2", "Tipo de Veículo", c("TOTAL","DE PASSAGEIROS",
+                                               "DE CARGA","MISTO","DE TRAÇÃO"))
+
+    selectInput("ano2", "Período(Em ano)", c("2005","2006","2007","2008","2009",
+                                          "2010","2011","2012","2013","2014",
+                                          "2015","2016","2017","2018","2019",
+                                          "2020","2021"))
+    
+    selectInput("lugar", "Região/Estado", c("Norte", "Acre", "Amazonas", "Amapá",                                             "Pará", "Rondônia", "Roraima", 
+                                            "Tocantins", "Nordeste", "Alagoas",                                              "Bahia", "Ceará", "Maranhão",                                                    "Paraíba", "Pernambuco", "Piauí",                                                "Rio Grande do Norte", "Sergipe",                                                "Sudeste", "Espírito Santo", "Minas Gerais", 
+                                            "Rio de Janeiro", "São Paulo", 
+                                            "Sul", "Paraná", 
+                                            "Rio Grande do Sul", "Santa Catarina", "Centro Oeste", 
+                                            "Distrito Federal", "Goiás", "Mato Grosso", "Mato Grosso do Sul"))
+
+```
+
+Column {.tabset data-width=500}
+-----------------------------------------------------------------------
+
+### **Tipo de Veículo pelo Total**
+
+```{r, fig.keep='none'}
+renderPlotly({
+    anos <- input$ano2
+    lugars <- input$lugar
+    
+    dados <- filter(dadosT, dadosT$name %in% lugars)
+    dados <- filter(dados, dados$DATA %in% anos)
+    
+    pizza1 <- dados %>% plot_ly() %>% 
+      add_pie(labels = ~c("DE PASSAGEIROS","DE CARGA","MISTO","DE TRAÇÃO"), 
+              values = ~c(dados$`DE PASSAGEIROS`, dados$`DE CARGA`,
+                          dados$MISTO, dados$`DE TRAÇÃO`),
+              name = "TOTAL", title = "TOTAL", 
+              marker = list(colors = c("dogdeblue", "firebrick", "forestgreen",
+                                       "gold"))) %>%
+      layout(title = ~paste0("<b>","Gráfico de Pizza de/do ","<b></b>", 
+                             lugars,"<b></b>"," por Tipo de Veículos"), 
+             showlegend = T,
+             xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+             yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+    
+    pizza1
+  })
+
+```
+
+### **Tipo de Veículo por Categoria**
+
+```{r}
+renderPlotly({
+    anos <- input$ano2
+    lugars <- input$lugar
+    
+    dados <- filter(dadosT, dadosT$name %in% lugars)
+    dados <- filter(dados, dados$DATA %in% anos)
+    
+    pale1 <- colorRampPalette(c("steelblue4", "cyan"))
+    pale2 <- colorRampPalette(c("darkred","brown1"))
+    pale3 <- colorRampPalette(c("forestgreen","lawngreen"))
+    pale4 <- colorRampPalette(c("gold","goldenrod4"))
+    
+    pizza2 <- dados %>% plot_ly() %>% 
+      add_pie(labels = ~c("AUTOMÓVEL","BONDE","CICLOMOTOR","MICROÔNIBUS",
+                          "MOTOCICLETA","MOTONETA","ÔNIBUS","QUADRICICLO",
+                          "SIDE CAR","TRICICLO"), 
+              values = ~c(dados$AUTOMÓVEL,dados$BONDE,dados$CICLOMOTOR,
+                          dados$MICROÔNIBUS,dados$MOTOCICLETA,dados$MOTONETA,
+                          dados$ÔNIBUS,dados$QUADRICICLO,dados$`SIDE.CAR`,
+                          dados$TRICICLO),
+              name = "DE PASSAGEIROS", domain = list(row = 0, column = 0),
+              title = "DE PASSAGEIROS", 
+              marker = list(colors = pale1(10))) %>%
+      add_pie(labels = ~c("CAMINHÃO","CAMINHONETE","REBOQUE","SEMI REBOQUE",
+                          "CHASSI PLATAFORMA"), 
+              values = ~c(dados$CAMINHÃO,dados$CAMINHONETE,dados$REBOQUE,
+                          dados$`SEMI.REBOQUE`,dados$`CHASSI.PLATAFORMA`),
+              title = "DE CARGA", 
+              name = "DE CARGA", domain = list(row = 0, column = 1),
+              marker = list(colors = pale2(5))) %>%
+      add_pie(labels = ~c("CAMIONETA","UTILITÁRIO","OUTROS"), 
+              values = ~c(dados$CAMIONETA,dados$UTILITÁRIO,dados$OUTROS),
+              title = "MISTO", 
+              name = "MISTO", domain = list(row = 1, column = 0),
+              marker = list(colors = pale3(3))) %>%
+      add_pie(labels = ~c("CAMINHÃO TRATOR","TRATOR ESTEIRA","TRATOR RODAS"), 
+              values = ~c(dados$`CAMINHÃO.TRATOR`,dados$`TRATOR.ESTEIRA`,
+                          dados$`TRATOR.RODAS`),
+              title = "DE TRAÇÃO", 
+              name = "DE TRAÇÃO", domain = list(row = 1, column = 1),
+              marker = list(colors = pale4(3))) %>% 
+      layout(showlegend = F, grid=list(rows=2, columns=2),
+             xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels =
+                            FALSE),
+             yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels =
+                            FALSE))
+    
+    pizza2
+  })
+
+
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### **Número de Veículos por Ano**
+
+```{r}
+renderPlotly({
+    variavel <- input$var2
+    lugars <- input$lugar
+    
+    dados <- filter(dadosT, dadosT$name %in% lugars)
+    
+    colorData <- dados[[variavel]]
+    
+    barras <- plot_ly(x = ~dados$DATA.MESES, 
+                      y = ~colorData) %>% 
+      add_bars(marker = list(color = 'greenyellow')) %>% 
+     layout(xaxis = list(title = "Anos"),
+            yaxis = list(title = variavel), 
+            showlegend = F)
+   
+   barras
+  })
+
+```
+
+### **Regressão Linear do Número de Veículos por Ano**
+
+```{r}
+renderPlotly({
+    variavel <- input$var2
+    lugars <- input$lugar
+    
+    dados <- filter(dadosT, dadosT$name %in% lugars)
+    
+    colorData <- dados[[variavel]]
+    
+    fit <- lm(colorData ~ dados$DATA.MESES)
+    
+    rl <- plot_ly() %>% 
+          add_lines(line = list(color = 'skyblue', width = 3), 
+                    x = ~dados$DATA.MESES, y = fitted(fit)) %>% 
+          add_markers(x = ~dados$DATA.MESES, y = ~colorData,
+                      marker = list(color = "darkblue")) %>% 
+          layout(xaxis = list(title = "Anos"),
+                 yaxis = list(title = variavel),
+                 showlegend = F)
+   
+   rl
+  })
+
+
+```
+
+Tabelas
+==================================
+
+Inputs {.sidebar}
+----------------------------------
+```{r}
+    selectInput("var3", "Tipo de Veículo", c("TOTAL","DE PASSAGEIROS",
+                                               "DE CARGA","MISTO","DE TRAÇÃO"))
+
+    selectInput("lugar3", "Regiões", c("Regiões", "Sudeste", "Sul", "Norte",
+                                      "Nordeste", "Centro Oeste"))
+
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### **Medias Resumo** 
+
+```{r}
+renderTable({
+    lugars <- input$lugar3
+    
+    if(lugars %in% "Regiões")
+      nu <- 2
+    if(lugars %in% "Sudeste")
+      nu <- 6
+    if(lugars %in% "Sul")
+      nu <- 7
+    if(lugars %in% "Norte")
+      nu <- 5
+    if(lugars %in% "Nordeste")
+      nu <- 4
+    if(lugars %in% "Centro Oeste")
+      nu <- 3
+    
+    variavel <- input$var3
+    
+    if(variavel %in% "TOTAL")
+      dados <- "tabelatotal.xlsx"
+    if(variavel %in% "DE PASSAGEIROS")
+      dados <- "tabelaDE_PASSAGEIROS.xlsx"
+    if(variavel %in% "DE CARGA")
+      dados <- "tabelaDECARGA.xlsx"
+    if(variavel %in% "MISTO")
+      dados <- "tabelaMISTO.xlsx"
+    if(variavel %in% "DE TRAÇÃO")
+      dados <- "tabelaDETRACAO.xlsx"
+    
+    tab <- read_xlsx(dados, sheet = nu)
+    
+    tab1 <- tab %>% 
+      gt() %>% tab_header(title=md("**Medidas Resumo**")) %>% 
+      tab_options(heading.align = "center",
+                  column_labels.border.top.color = "black",
+                  column_labels.border.top.width = px(3),
+                  column_labels.background.color = "dodgerblue") %>% 
+      cols_align(align = "center") 
+    
+    tab1
+  })
+
+
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### **Glossário**
+
+```{r}
+  renderTable({
+    variavel <- input$var3
+    
+    if(variavel %in% "TOTAL")
+      nu <- 1
+    if(variavel %in% "DE PASSAGEIROS")
+      nu <- 2
+    if(variavel %in% "DE CARGA")
+      nu <- 3
+    if(variavel %in% "MISTO")
+      nu <- 4
+    if(variavel %in% "DE TRAÇÃO")
+      nu <- 5
+    
+    tab <- read_xlsx("Glossario.xlsx", sheet = nu)
+    
+    tab2 <- tab %>% gt() %>% 
+      tab_header(title=md("**Glossário**")) %>% 
+      tab_options(heading.align = "center",
+                  column_labels.border.top.color = "black",
+                  column_labels.border.top.width = px(3),
+                  column_labels.background.color = "dodgerblue") %>% 
+      cols_align(align = "center") %>% 
+      cols_label(TERMO=md("**TERMO**"),
+                 DEFINIÇÃO=md("**DEFINIÇÃO**")
+                 )
+  
+    tab2
+    
+  })
+
+
+```
+
+
+
+
+
